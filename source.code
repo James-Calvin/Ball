@@ -1,0 +1,216 @@
+// Title: Ball Simulator
+// Date: 2026-06-19
+// Author: James-Calvin
+// Description: Simulates basic physics of balls affected by gravity and are
+//              able to collide with each other. They can be dragged around
+//              with the mouse and are constrained within an invisible disc.
+
+array<Ball> balls;
+constant integer MAX_BALL_COUNT = 1000;
+integer BALL_COUNT = 0;
+constant Color WHITE = Colors.rgb(255, 255, 255);
+constant Color BACKGROUND_COLOR = Colors.rgb(0, 6, 12);
+constant Color TEXT_COLOR = Colors.rgb(0, 32, 64);
+
+constant integer FPS_BUFFER_COUNT = 30;
+integer FPS_BUFFER_HEAD = 0;
+array<real> FPS_BUFFER = new array<integer>(FPS_BUFFER_COUNT);
+
+function<byte> randomByte() {
+  return (random() * 256) as byte;
+}
+
+function start() {
+  balls = new array<Ball>(MAX_BALL_COUNT);
+
+  foreach index in FPS_BUFFER_COUNT then FPS_BUFFER[index] = 30;
+}
+
+Ball heldBall;
+boolean isHolding;
+function update() {
+  constant real deltaTime = Diagnostics.lastFrameIntervalMilliseconds() / 1000;
+  constant real screenHalfWidth = Viewport.safeWidth() / 2;
+  constant real screenHalfHeight = Viewport.safeHeight() / 2;
+  constant real constraintRadius = 100;
+
+  if Input.pointerWasPressed() then {
+    real inputX = Input.pointerWorldX();
+    real inputY = Input.pointerWorldY();
+
+    heldBall = createBallWithRandomColor(inputX, inputY);
+    isHolding = true;
+  }
+
+  if isHolding then {
+    heldBall.x = Input.pointerWorldX();
+    heldBall.y = Input.pointerWorldY();
+  }
+
+  if Input.pointerWasReleased() then {
+    isHolding = false;
+  }
+
+  if BALL_COUNT == 0 then return;
+  foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
+    applyGravity(ball, 0, 100);
+    applyConstraint(ball, screenHalfWidth, screenHalfHeight, constraintRadius);
+    foreach otherIndex in BALL_COUNT then {
+      if otherIndex != index then {
+        solveCollision(ball, balls[otherIndex]);
+      }
+    }
+    ball.updatePosition(deltaTime);
+  }
+}
+
+function draw() {
+  Draw.clearScreen(BACKGROUND_COLOR);
+
+  integer fps = Diagnostics.estimatedFramesPerSecond() as integer;
+  FPS_BUFFER[FPS_BUFFER_HEAD] = Diagnostics.estimatedFramesPerSecond();
+  FPS_BUFFER_HEAD = (FPS_BUFFER_HEAD + 1) % FPS_BUFFER_COUNT;
+
+  real fpsBufferSum = 0;
+  foreach index in FPS_BUFFER_COUNT then fpsBufferSum += FPS_BUFFER[index];
+  integer displayFps = (fpsBufferSum / FPS_BUFFER_COUNT) as integer;
+
+  real space = 12;
+  Draw.text(
+    "{displayFps}fps", 
+    Viewport.safeWidth()/2,
+    (Viewport.safeHeight() - space)/2,
+    8,
+    "center",
+    "center",
+    TEXT_COLOR
+  );
+  Draw.text(
+    "Ball Count: {BALL_COUNT}",
+    Viewport.safeWidth()/2,
+    (Viewport.safeHeight() + space)/2,
+    8,
+    "center",
+    "center",
+    TEXT_COLOR
+  );
+
+  if BALL_COUNT > 0 then {
+    foreach index in BALL_COUNT then {
+      Ball ball = balls[index];
+      Color ballColor = Colors.rgb(ball.r, ball.g, ball.b);
+      Draw.circle(ball.x, ball.y, ball.radius, ballColor);
+    }
+  }
+
+}
+
+function addBall(Ball ball) {
+  if BALL_COUNT >= MAX_BALL_COUNT then return;
+  balls[BALL_COUNT] = ball;
+  BALL_COUNT += 1;
+  
+}
+
+function<Ball> createBallWithRandomColor(real x, real y) {
+  Ball newBall = new Ball(x, y, 5, randomByte(), randomByte(), randomByte());
+  addBall(newBall);
+  return newBall;
+}
+
+function applyGravity(Ball ball,real gravityX, real gravityY) {
+  ball.accelerate(gravityX, gravityY);
+}
+
+function applyConstraint(Ball ball, real x, real y, real radius) {
+  constant real dx = ball.x - x;
+  constant real dy = ball.y - y;
+  constant real distance = squareRoot(dx * dx + dy * dy);
+
+  if distance > (radius - ball.radius) then {
+    constant real nX = dx / distance;
+    constant real nY = dy / distance;
+    ball.x = x + nX * (radius - ball.radius);
+    ball.y = y + nY * (radius - ball.radius);
+  }
+}
+
+function solveCollision(Ball ballA, Ball ballB) {
+  constant real dx = ballB.x - ballA.x;
+  constant real dy = ballB.y - ballA.y;
+  constant real distance = squareRoot(dx * dx + dy * dy);
+  constant real minDistance = ballA.radius + ballB.radius;
+
+  if distance < minDistance then {
+    constant real overlap = minDistance - distance;
+    constant real nX = dx / distance;
+    constant real nY = dy / distance;
+
+    ballA.x = ballA.x - nX * overlap / 2;
+    ballA.y = ballA.y - nY * overlap / 2;
+    ballB.x = ballB.x + nX * overlap / 2;
+    ballB.y = ballB.y + nY * overlap / 2;
+  }
+}
+
+// This language doesn't have square root, so we have to implement it ourselves.
+function<real> squareRoot(real value) {
+  if value <= 0 then return 0;
+
+  real guess = value / 2;
+  real epsilon = 0.00001;
+
+  while true then {
+    real difference = guess * guess - value;
+    if absolute(difference) <= epsilon then break;
+    guess = (guess + value / guess) / 2;
+  }
+  return guess;
+}
+
+object Ball {
+  real x;
+  real y;
+  real previousX;
+  real previousY;
+  real accelerationX;
+  real accelerationY;
+  real radius;
+
+  byte r;
+  byte g;
+  byte b;
+
+  constructor(real x, real y, real radius, byte r, byte g, byte b) {
+    this.x = x;
+    this.y = y;
+    this.previousX = x;
+    this.previousY = y;
+    this.accelerationX = 0;
+    this.accelerationY = 0;
+    this.radius = radius;
+    this.r = r;
+    this.g = g;
+    this.b = b;
+  }
+
+  function updatePosition(real deltaTime) {
+    constant real velocityX = x - previousX;
+    constant real velocityY = y - previousY;
+
+    previousX = x;
+    previousY = y;
+
+    x = x + velocityX + accelerationX * deltaTime * deltaTime;
+    y = y + velocityY + accelerationY * deltaTime * deltaTime;
+
+    accelerationX = 0;
+    accelerationY = 0;
+  }
+
+  function accelerate(real ax, real ay) {
+    accelerationX = accelerationX + ax;
+    accelerationY = accelerationY + ay;
+  }
+}
