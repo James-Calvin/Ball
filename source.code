@@ -28,9 +28,14 @@ array<Ball> balls;
 constant integer MAX_BALL_COUNT = 1000;
 integer BALL_COUNT = 0;
 
+// Screen utility
+real HALF_SCREEN_WIDTH = 1;
+real HALF_SCREEN_HEIGHT;
+
 // Color constants
 constant Color WHITE = Colors.rgb(255, 255, 255);
 constant Color BACKGROUND_COLOR = Colors.rgb(0, 6, 12);
+constant Color PLAY_AREA_COLOR = Colors.rgb(0, 12, 24);
 constant Color TEXT_COLOR = Colors.rgb(0, 32, 64);
 
 // Performance metrics
@@ -39,12 +44,13 @@ integer FPS_BUFFER_HEAD = 0;
 array<real> FPS_BUFFER = new array<integer>(FPS_BUFFER_COUNT);
 
 // Ball configuration
-constant real MIN_BALL_RADIUS = 5;
-constant real MAX_BALL_RADIUS = 20;
+constant real MIN_BALL_RADIUS = 20;
+constant real MAX_BALL_RADIUS = 40;
 
-// World constants
+// World values
 constant real GRAVITY_X = 0;
 constant real GRAVITY_Y = 1600;
+real PLAY_RADIUS = 1;
 
 function start() {
   balls = new array<Ball>(MAX_BALL_COUNT);
@@ -56,15 +62,14 @@ Ball heldBall;
 boolean isHolding;
 function update() {
   constant real deltaTime = Diagnostics.lastFrameIntervalMilliseconds() / 1000;
-  constant real halfSafeWidth = Viewport.safeWidth() / 2;
-  constant real halfSafeHeight = Viewport.safeHeight() / 2;
-  constant real halfScreenWidth = Viewport.viewWidth() / 2;
-  constant real halfScreenHeight = Viewport.viewHeight() / 2;
-  constant real constraintRadius = minimum(halfScreenWidth, halfScreenHeight);
+
+  HALF_SCREEN_WIDTH = Viewport.hudWidth() / 2;
+  HALF_SCREEN_HEIGHT = Viewport.hudHeight() / 2;
+  PLAY_RADIUS = minimum(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
 
   if Input.pointerWasPressed() and BALL_COUNT < MAX_BALL_COUNT then {
-    real inputX = Input.pointerWorldX();
-    real inputY = Input.pointerWorldY();
+    real inputX = Input.pointerScreenX();
+    real inputY = Input.pointerScreenY();
 
     real radiusDifference = MAX_BALL_RADIUS - MIN_BALL_RADIUS;
     real radius = MIN_BALL_RADIUS + random() * (radiusDifference);
@@ -78,8 +83,8 @@ function update() {
   }
 
   if isHolding then {
-    heldBall.x = Input.pointerWorldX();
-    heldBall.y = Input.pointerWorldY();
+    heldBall.x = Input.pointerScreenX();
+    heldBall.y = Input.pointerScreenY();
 
     constant real growthRate = 100 * deltaTime;
     if Input.keyIsDown(38) and heldBall.radius < MAX_BALL_RADIUS - growthRate
@@ -96,7 +101,7 @@ function update() {
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
     ball.accelerate(GRAVITY_X, GRAVITY_Y);
-    applyConstraint(ball, halfSafeWidth, halfSafeHeight, constraintRadius);
+    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
     foreach otherIndex in BALL_COUNT then {
       if otherIndex != index then {
         solveCollision(ball, balls[otherIndex]);
@@ -106,8 +111,16 @@ function update() {
   }
 }
 
-function draw() {
+function draw() {}
+
+function drawHud() {
   Draw.clearScreen(BACKGROUND_COLOR);
+  Draw.circle(
+    HALF_SCREEN_WIDTH, 
+    HALF_SCREEN_HEIGHT, 
+    PLAY_RADIUS, 
+    PLAY_AREA_COLOR
+  ); 
 
   integer fps = Diagnostics.estimatedFramesPerSecond() as integer;
   FPS_BUFFER[FPS_BUFFER_HEAD] = Diagnostics.estimatedFramesPerSecond();
@@ -117,21 +130,22 @@ function draw() {
   foreach index in FPS_BUFFER_COUNT then fpsBufferSum += FPS_BUFFER[index];
   integer displayFps = (fpsBufferSum / FPS_BUFFER_COUNT) as integer;
 
-  real space = 12;
+  real fontSize = 24;
+  real space = fontSize * 1.5;
   Draw.text(
     "{displayFps}fps", 
-    Viewport.safeWidth()/2,
-    (Viewport.safeHeight() - space)/2,
-    8,
+    Viewport.hudWidth()/2,
+    (Viewport.hudHeight() - space)/2,
+    fontSize,
     "center",
     "center",
     TEXT_COLOR
   );
   Draw.text(
     "Ball Count: {BALL_COUNT}",
-    Viewport.safeWidth()/2,
-    (Viewport.safeHeight() + space)/2,
-    8,
+    Viewport.hudWidth()/2,
+    (Viewport.hudHeight() + space)/2,
+    fontSize,
     "center",
     "center",
     TEXT_COLOR
@@ -181,21 +195,6 @@ function solveCollision(Ball ballA, Ball ballB) {
     ballB.y = ballB.y + nY * overlap / 2;
   }
 }
-
-// // This language doesn't have square root, so we have to implement it ourselves.
-// function<real> squareRoot(real value) {
-//   if value <= 0 then return 0;
-
-//   real guess = value / 2;
-//   real epsilon = 0.00001;
-
-//   while true then {
-//     real difference = guess * guess - value;
-//     if absolute(difference) <= epsilon then break;
-//     guess = (guess + value / guess) / 2;
-//   }
-//   return guess;
-// }
 
 object Ball {
   real x;
