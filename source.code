@@ -4,6 +4,23 @@
 // Description: Simulates basic physics of balls affected by gravity and are
 //              able to collide with each other. They can be dragged around
 //              with the mouse and are constrained within an invisible disc.
+// Notes: Simulation breaks down at about 40 balls. Sub-stepping increases
+//            stability, but slows the simulation down. Performance is the
+//            biggest concern now. 
+//      - Color datatype is capitalized even though no others are
+//      - Passing color into each draw is tedious. A `Draw.setColor` method
+//            would be nice to have.
+//      - Draw.text method is cumbersome; Draw.setFont, Draw.setFontSize,
+//            Draw.setFontHorizontalAlignment, Draw.setFontVerticalAlignment may
+//            be their own functions to reduce signature size
+//      - [bug] for-loops of size 0 still run.
+//      - Null checking may be desired, but that's awkwardly done with optional.
+//      - Colors.oklch would be a nice to have
+//      - Need to visit/document what math functions are available (no square 
+//            root function is available)
+//      - Need away to set the aspect ratio of the viewport's safe area. 
+//      - No related to this example, but a deterministic random function is
+//            another thing that would be nice to have.
 
 array<Ball> balls;
 constant integer MAX_BALL_COUNT = 1000;
@@ -30,9 +47,11 @@ Ball heldBall;
 boolean isHolding;
 function update() {
   constant real deltaTime = Diagnostics.lastFrameIntervalMilliseconds() / 1000;
-  constant real screenHalfWidth = Viewport.safeWidth() / 2;
-  constant real screenHalfHeight = Viewport.safeHeight() / 2;
-  constant real constraintRadius = 100;
+  constant real halfSafeWidth = Viewport.safeWidth() / 2;
+  constant real halfSafeHeight = Viewport.safeHeight() / 2;
+  constant real halfScreenWidth = Viewport.viewWidth() / 2;
+  constant real halfScreenHeight = Viewport.viewHeight() / 2;
+  constant real constraintRadius = minimum(halfScreenWidth, halfScreenHeight);
 
   if Input.pointerWasPressed() then {
     real inputX = Input.pointerWorldX();
@@ -55,7 +74,7 @@ function update() {
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
     applyGravity(ball, 0, 100);
-    applyConstraint(ball, screenHalfWidth, screenHalfHeight, constraintRadius);
+    applyConstraint(ball, halfSafeWidth, halfSafeHeight, constraintRadius);
     foreach otherIndex in BALL_COUNT then {
       if otherIndex != index then {
         solveCollision(ball, balls[otherIndex]);
@@ -114,7 +133,7 @@ function addBall(Ball ball) {
 }
 
 function<Ball> createBallWithRandomColor(real x, real y) {
-  Ball newBall = new Ball(x, y, 5, randomByte(), randomByte(), randomByte());
+  Ball newBall = new Ball(x, y, 15, randomByte(), randomByte(), randomByte());
   addBall(newBall);
   return newBall;
 }
