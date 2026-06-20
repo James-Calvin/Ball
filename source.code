@@ -39,9 +39,9 @@ constant Color PLAY_AREA_COLOR = Colors.rgb(0, 12, 24);
 constant Color TEXT_COLOR = Colors.rgb(0, 32, 64);
 
 // Performance metrics
-constant integer FPS_BUFFER_COUNT = 30;
-integer FPS_BUFFER_HEAD = 0;
-array<real> FPS_BUFFER = new array<integer>(FPS_BUFFER_COUNT);
+constant integer WORK_BUFFER_COUNT = 30;
+integer WORK_BUFFER_HEAD = 0;
+array<real> WORK_BUFFER = new array<integer>(WORK_BUFFER_COUNT);
 
 // Ball configuration
 constant real MIN_BALL_RADIUS = 20;
@@ -55,7 +55,7 @@ real PLAY_RADIUS = 1;
 function start() {
   balls = new array<Ball>(MAX_BALL_COUNT);
 
-  foreach index in FPS_BUFFER_COUNT then FPS_BUFFER[index] = 30;
+  foreach index in WORK_BUFFER_COUNT then WORK_BUFFER[index] = 30;
 }
 
 Ball heldBall;
@@ -122,18 +122,17 @@ function drawHud() {
     PLAY_AREA_COLOR
   ); 
 
-  integer fps = Diagnostics.estimatedFramesPerSecond() as integer;
-  FPS_BUFFER[FPS_BUFFER_HEAD] = Diagnostics.estimatedFramesPerSecond();
-  FPS_BUFFER_HEAD = (FPS_BUFFER_HEAD + 1) % FPS_BUFFER_COUNT;
+  WORK_BUFFER[WORK_BUFFER_HEAD] = Diagnostics.lastUpdateWorkMilliseconds();
+  WORK_BUFFER_HEAD = (WORK_BUFFER_HEAD + 1) % WORK_BUFFER_COUNT;
 
   real fpsBufferSum = 0;
-  foreach index in FPS_BUFFER_COUNT then fpsBufferSum += FPS_BUFFER[index];
-  integer displayFps = (fpsBufferSum / FPS_BUFFER_COUNT) as integer;
+  foreach index in WORK_BUFFER_COUNT then fpsBufferSum += WORK_BUFFER[index];
+  integer displayFps = (fpsBufferSum / WORK_BUFFER_COUNT) as integer;
 
   real fontSize = 24;
   real space = fontSize * 1.5;
   Draw.text(
-    "{displayFps}fps", 
+    "{displayFps}ms workload", 
     Viewport.hudWidth()/2,
     (Viewport.hudHeight() - space)/2,
     fontSize,
