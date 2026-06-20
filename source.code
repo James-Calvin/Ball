@@ -22,20 +22,29 @@
 //      - No related to this example, but a deterministic random function is
 //            another thing that would be nice to have.
 
+
+// Tracking utility
 array<Ball> balls;
 constant integer MAX_BALL_COUNT = 1000;
 integer BALL_COUNT = 0;
+
+// Color constants
 constant Color WHITE = Colors.rgb(255, 255, 255);
 constant Color BACKGROUND_COLOR = Colors.rgb(0, 6, 12);
 constant Color TEXT_COLOR = Colors.rgb(0, 32, 64);
 
+// Performance metrics
 constant integer FPS_BUFFER_COUNT = 30;
 integer FPS_BUFFER_HEAD = 0;
 array<real> FPS_BUFFER = new array<integer>(FPS_BUFFER_COUNT);
 
-function<byte> randomByte() {
-  return (random() * 256) as byte;
-}
+// Ball configuration
+constant real MIN_BALL_RADIUS = 5;
+constant real MAX_BALL_RADIUS = 20;
+
+// World constants
+constant real GRAVITY_X = 0;
+constant real GRAVITY_Y = 1600;
 
 function start() {
   balls = new array<Ball>(MAX_BALL_COUNT);
@@ -53,17 +62,30 @@ function update() {
   constant real halfScreenHeight = Viewport.viewHeight() / 2;
   constant real constraintRadius = minimum(halfScreenWidth, halfScreenHeight);
 
-  if Input.pointerWasPressed() then {
+  if Input.pointerWasPressed() and BALL_COUNT < MAX_BALL_COUNT then {
     real inputX = Input.pointerWorldX();
     real inputY = Input.pointerWorldY();
 
-    heldBall = createBallWithRandomColor(inputX, inputY);
+    real radiusDifference = MAX_BALL_RADIUS - MIN_BALL_RADIUS;
+    real radius = MIN_BALL_RADIUS + random() * (radiusDifference);
+
+    byte red = randomByte();
+    byte green = randomByte();
+    byte blue = randomByte();
+
+    heldBall = new Ball(inputX, inputY, radius, red, green, blue);
     isHolding = true;
   }
 
   if isHolding then {
     heldBall.x = Input.pointerWorldX();
     heldBall.y = Input.pointerWorldY();
+
+    constant real growthRate = 100 * deltaTime;
+    if Input.keyIsDown(38) and heldBall.radius < MAX_BALL_RADIUS - growthRate
+      then heldBall.radius += growthRate; 
+    if Input.keyIsDown(40) and heldBall.radius > growthRate + MIN_BALL_RADIUS
+      then heldBall.radius -= growthRate; 
   }
 
   if Input.pointerWasReleased() then {
@@ -73,7 +95,7 @@ function update() {
   if BALL_COUNT == 0 then return;
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
-    applyGravity(ball, 0, 100);
+    ball.accelerate(GRAVITY_X, GRAVITY_Y);
     applyConstraint(ball, halfSafeWidth, halfSafeHeight, constraintRadius);
     foreach otherIndex in BALL_COUNT then {
       if otherIndex != index then {
@@ -125,21 +147,8 @@ function draw() {
 
 }
 
-function addBall(Ball ball) {
-  if BALL_COUNT >= MAX_BALL_COUNT then return;
-  balls[BALL_COUNT] = ball;
-  BALL_COUNT += 1;
-  
-}
-
-function<Ball> createBallWithRandomColor(real x, real y) {
-  Ball newBall = new Ball(x, y, 15, randomByte(), randomByte(), randomByte());
-  addBall(newBall);
-  return newBall;
-}
-
-function applyGravity(Ball ball,real gravityX, real gravityY) {
-  ball.accelerate(gravityX, gravityY);
+function<byte> randomByte() {
+  return (random() * 256) as byte;
 }
 
 function applyConstraint(Ball ball, real x, real y, real radius) {
@@ -173,20 +182,20 @@ function solveCollision(Ball ballA, Ball ballB) {
   }
 }
 
-// This language doesn't have square root, so we have to implement it ourselves.
-function<real> squareRoot(real value) {
-  if value <= 0 then return 0;
+// // This language doesn't have square root, so we have to implement it ourselves.
+// function<real> squareRoot(real value) {
+//   if value <= 0 then return 0;
 
-  real guess = value / 2;
-  real epsilon = 0.00001;
+//   real guess = value / 2;
+//   real epsilon = 0.00001;
 
-  while true then {
-    real difference = guess * guess - value;
-    if absolute(difference) <= epsilon then break;
-    guess = (guess + value / guess) / 2;
-  }
-  return guess;
-}
+//   while true then {
+//     real difference = guess * guess - value;
+//     if absolute(difference) <= epsilon then break;
+//     guess = (guess + value / guess) / 2;
+//   }
+//   return guess;
+// }
 
 object Ball {
   real x;
@@ -212,6 +221,11 @@ object Ball {
     this.r = r;
     this.g = g;
     this.b = b;
+
+    if BALL_COUNT < MAX_BALL_COUNT then {
+      balls[BALL_COUNT] = this;
+      BALL_COUNT += 1;
+    }
   }
 
   function updatePosition(real deltaTime) {
