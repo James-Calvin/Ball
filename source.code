@@ -23,6 +23,9 @@
 //            another thing that would be nice to have.
 
 
+// Debug flag
+boolean DEBUG = false; 
+
 // Tracking utility
 array<Ball> balls;
 constant integer MAX_BALL_COUNT = 100;
@@ -44,8 +47,8 @@ integer WORK_BUFFER_HEAD = 0;
 array<real> WORK_BUFFER = new array<integer>(WORK_BUFFER_COUNT);
 
 // Ball configuration
-constant real MIN_BALL_RADIUS = 25;
-constant real MAX_BALL_RADIUS = 40;
+constant real MIN_BALL_RADIUS = 30;
+constant real MAX_BALL_RADIUS = 50;
 constant real MAX_WORK_MS = 20;
 constant real RECOVER_WORK_MS = 17;
 boolean IS_RECOVERING = false;
@@ -53,6 +56,7 @@ boolean IS_RECOVERING = false;
 // World values
 constant real GRAVITY_X = 0;
 constant real GRAVITY_Y = 3200;
+real DEFAULT_PLAY_RADIUS = 540; // Radius during testing; used for scaling
 real PLAY_RADIUS = 1;
 
 function start() {
@@ -144,32 +148,43 @@ function drawHud() {
   foreach index in WORK_BUFFER_COUNT then workMsBufferSum += WORK_BUFFER[index];
   integer displayWorkMs = (workMsBufferSum / WORK_BUFFER_COUNT) as integer;
 
-  real fontSize = 24;
-  real space = fontSize * 1.5;
-  Draw.text(
-    "{displayWorkMs}ms workload", 
-    Viewport.hudWidth()/2,
-    (Viewport.hudHeight() - space)/2,
-    fontSize,
-    "center",
-    "center",
-    TEXT_COLOR
-  );
-  Draw.text(
-    "Ball Count: {BALL_COUNT}",
-    Viewport.hudWidth()/2,
-    (Viewport.hudHeight() + space)/2,
-    fontSize,
-    "center",
-    "center",
-    TEXT_COLOR
-  );
+  if DEBUG then {
+    real fontSize = 24;
+    real space = fontSize * 1.5;
+    Draw.text(
+      "{displayWorkMs}ms workload", 
+      Viewport.hudWidth()/2,
+      (Viewport.hudHeight() - space)/2,
+      fontSize,
+      "center",
+      "center",
+      TEXT_COLOR
+    );
+    Draw.text(
+      "Ball Count: {BALL_COUNT}",
+      Viewport.hudWidth()/2,
+      (Viewport.hudHeight() + space)/2,
+      fontSize,
+      "center",
+      "center",
+      TEXT_COLOR
+    );
+    Draw.text(
+      "Play Radius: {PLAY_RADIUS}",
+      10,
+      10,
+      fontSize,
+      "left",
+      "center",
+      TEXT_COLOR
+    );
+  }
 
   if BALL_COUNT > 0 then {
     foreach index in BALL_COUNT then {
       Ball ball = balls[index];
       Color ballColor = Colors.rgb(ball.r, ball.g, ball.b);
-      Draw.circle(ball.x, ball.y, ball.radius, ballColor);
+      Draw.circle(ball.x, ball.y, ball.scaledRadius(), ballColor);
     }
   }
 
@@ -178,10 +193,10 @@ function drawHud() {
 function<optional<Ball>> ballAtPoint(real x, real y) {
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
-    if x >= ball.x - ball.radius
-      and x <= ball.x + ball.radius
-      and y >= ball.y - ball.radius
-      and y <= ball.y + ball.radius
+    if x >= ball.x - ball.scaledRadius()
+      and x <= ball.x + ball.scaledRadius()
+      and y >= ball.y - ball.scaledRadius()
+      and y <= ball.y + ball.scaledRadius()
       then return ball;
   }
   return none;
@@ -208,11 +223,11 @@ function applyConstraint(Ball ball, real x, real y, real radius) {
   constant real dy = ball.y - y;
   constant real distance = squareRoot(dx * dx + dy * dy);
 
-  if distance > (radius - ball.radius) then {
+  if distance > (radius - ball.scaledRadius()) then {
     constant real nX = dx / distance;
     constant real nY = dy / distance;
-    ball.x = x + nX * (radius - ball.radius);
-    ball.y = y + nY * (radius - ball.radius);
+    ball.x = x + nX * (radius - ball.scaledRadius());
+    ball.y = y + nY * (radius - ball.scaledRadius());
   }
 }
 
@@ -220,7 +235,7 @@ function solveCollision(Ball ballA, Ball ballB) {
   constant real dx = ballB.x - ballA.x;
   constant real dy = ballB.y - ballA.y;
   constant real distance = squareRoot(dx * dx + dy * dy);
-  constant real minDistance = ballA.radius + ballB.radius;
+  constant real minDistance = ballA.scaledRadius() + ballB.scaledRadius();
 
   if distance > 0 and distance < minDistance then {
     constant real overlap = minDistance - distance;
@@ -263,6 +278,10 @@ object Ball {
       balls[BALL_COUNT] = this;
       BALL_COUNT += 1;
     }
+  }
+
+  function<real> scaledRadius() {
+    return PLAY_RADIUS / DEFAULT_PLAY_RADIUS * radius; 
   }
 
   function updatePosition(real deltaTime) {
