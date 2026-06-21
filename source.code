@@ -46,6 +46,9 @@ array<real> WORK_BUFFER = new array<integer>(WORK_BUFFER_COUNT);
 // Ball configuration
 constant real MIN_BALL_RADIUS = 20;
 constant real MAX_BALL_RADIUS = 40;
+constant real MAX_WORK_MS = 64;
+constant real RECOVER_WORK_MS = 32;
+boolean IS_RECOVERING = false;
 
 // World values
 constant real GRAVITY_X = 0;
@@ -53,15 +56,21 @@ constant real GRAVITY_Y = 1600;
 real PLAY_RADIUS = 1;
 
 function start() {
-  balls = new array<Ball>(MAX_BALL_COUNT);
+  Runtime.setFixedUpdateRate(60);
 
+  balls = new array<Ball>(MAX_BALL_COUNT);
   foreach index in WORK_BUFFER_COUNT then WORK_BUFFER[index] = 30;
 }
 
 Ball heldBall;
 boolean isHolding;
 function update() {
-  constant real deltaTime = Diagnostics.lastFrameIntervalMilliseconds() / 1000;
+  constant real deltaTime = Diagnostics.updateDeltaMilliseconds() / 1000;
+
+  real lastWork = Diagnostics.lastUpdateWorkMilliseconds();
+  if lastWork < RECOVER_WORK_MS then IS_RECOVERING = false;
+  if IS_RECOVERING and BALL_COUNT > 0 then BALL_COUNT -= 1; 
+  if lastWork > MAX_WORK_MS then IS_RECOVERING = true;
 
   HALF_SCREEN_WIDTH = Viewport.hudWidth() / 2;
   HALF_SCREEN_HEIGHT = Viewport.hudHeight() / 2;
@@ -125,14 +134,14 @@ function drawHud() {
   WORK_BUFFER[WORK_BUFFER_HEAD] = Diagnostics.lastUpdateWorkMilliseconds();
   WORK_BUFFER_HEAD = (WORK_BUFFER_HEAD + 1) % WORK_BUFFER_COUNT;
 
-  real fpsBufferSum = 0;
-  foreach index in WORK_BUFFER_COUNT then fpsBufferSum += WORK_BUFFER[index];
-  integer displayFps = (fpsBufferSum / WORK_BUFFER_COUNT) as integer;
+  real workMsBufferSum = 0;
+  foreach index in WORK_BUFFER_COUNT then workMsBufferSum += WORK_BUFFER[index];
+  integer displayWorkMs = (workMsBufferSum / WORK_BUFFER_COUNT) as integer;
 
   real fontSize = 24;
   real space = fontSize * 1.5;
   Draw.text(
-    "{displayFps}ms workload", 
+    "{displayWorkMs}ms workload", 
     Viewport.hudWidth()/2,
     (Viewport.hudHeight() - space)/2,
     fontSize,
@@ -183,7 +192,7 @@ function solveCollision(Ball ballA, Ball ballB) {
   constant real distance = squareRoot(dx * dx + dy * dy);
   constant real minDistance = ballA.radius + ballB.radius;
 
-  if distance < minDistance then {
+  if distance > 0 and distance < minDistance then {
     constant real overlap = minDistance - distance;
     constant real nX = dx / distance;
     constant real nY = dy / distance;
