@@ -25,7 +25,7 @@
 
 // Tracking utility
 array<Ball> balls;
-constant integer MAX_BALL_COUNT = 1000;
+constant integer MAX_BALL_COUNT = 100;
 integer BALL_COUNT = 0;
 
 // Screen utility
@@ -44,15 +44,15 @@ integer WORK_BUFFER_HEAD = 0;
 array<real> WORK_BUFFER = new array<integer>(WORK_BUFFER_COUNT);
 
 // Ball configuration
-constant real MIN_BALL_RADIUS = 20;
+constant real MIN_BALL_RADIUS = 25;
 constant real MAX_BALL_RADIUS = 40;
-constant real MAX_WORK_MS = 64;
-constant real RECOVER_WORK_MS = 32;
+constant real MAX_WORK_MS = 20;
+constant real RECOVER_WORK_MS = 17;
 boolean IS_RECOVERING = false;
 
 // World values
 constant real GRAVITY_X = 0;
-constant real GRAVITY_Y = 1600;
+constant real GRAVITY_Y = 3200;
 real PLAY_RADIUS = 1;
 
 function start() {
@@ -62,51 +62,57 @@ function start() {
   foreach index in WORK_BUFFER_COUNT then WORK_BUFFER[index] = 30;
 }
 
-Ball heldBall;
-boolean isHolding;
+optional<Ball> heldBall = none;
 function update() {
   constant real deltaTime = Diagnostics.updateDeltaMilliseconds() / 1000;
 
   real lastWork = Diagnostics.lastUpdateWorkMilliseconds();
   if lastWork < RECOVER_WORK_MS then IS_RECOVERING = false;
-  if IS_RECOVERING and BALL_COUNT > 0 then BALL_COUNT -= 1; 
+  if (IS_RECOVERING or Input.keyIsDown(37)) 
+    and BALL_COUNT > 0 then BALL_COUNT -= 1; 
   if lastWork > MAX_WORK_MS then IS_RECOVERING = true;
 
   HALF_SCREEN_WIDTH = Viewport.hudWidth() / 2;
   HALF_SCREEN_HEIGHT = Viewport.hudHeight() / 2;
   PLAY_RADIUS = minimum(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
 
-  if Input.pointerWasPressed() and BALL_COUNT < MAX_BALL_COUNT then {
+  // Fast create balls for testing and tuning
+  if Input.keyIsDown(39) and BALL_COUNT < MAX_BALL_COUNT then {
+    Ball ball = makeBall(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
+    ball.accelerate(random() * GRAVITY_Y * 2, 0);
+  }
+
+  // Click a ball into existence
+  if Input.pointerWasPressed() then {
     real inputX = Input.pointerScreenX();
     real inputY = Input.pointerScreenY();
 
-    real radiusDifference = MAX_BALL_RADIUS - MIN_BALL_RADIUS;
-    real radius = MIN_BALL_RADIUS + random() * (radiusDifference);
-
-    byte red = randomByte();
-    byte green = randomByte();
-    byte blue = randomByte();
-
-    heldBall = new Ball(inputX, inputY, radius, red, green, blue);
-    isHolding = true;
+    heldBall = ballAtPoint(inputX, inputY); 
+    if not heldBall.hasValue and BALL_COUNT < MAX_BALL_COUNT then {
+      heldBall = makeBall(inputX, inputY);
+    }
   }
 
-  if isHolding then {
-    heldBall.x = Input.pointerScreenX();
-    heldBall.y = Input.pointerScreenY();
+  // Held ball follows mouse cursor
+  if heldBall.hasValue then {
+    heldBall.value.x = Input.pointerScreenX();
+    heldBall.value.y = Input.pointerScreenY();
 
+    // Adjust size of held ball
     constant real growthRate = 100 * deltaTime;
-    if Input.keyIsDown(38) and heldBall.radius < MAX_BALL_RADIUS - growthRate
-      then heldBall.radius += growthRate; 
-    if Input.keyIsDown(40) and heldBall.radius > growthRate + MIN_BALL_RADIUS
-      then heldBall.radius -= growthRate; 
+    if Input.keyIsDown(38) and heldBall.value.radius < MAX_BALL_RADIUS - growthRate
+      then heldBall.value.radius += growthRate; 
+    if Input.keyIsDown(40) and heldBall.value.radius > growthRate + MIN_BALL_RADIUS
+      then heldBall.value.radius -= growthRate; 
   }
 
+  // Release held ball
   if Input.pointerWasReleased() then {
-    isHolding = false;
+    heldBall = none;
   }
 
   if BALL_COUNT == 0 then return;
+  
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
     ball.accelerate(GRAVITY_X, GRAVITY_Y);
@@ -167,6 +173,30 @@ function drawHud() {
     }
   }
 
+}
+
+function<optional<Ball>> ballAtPoint(real x, real y) {
+  foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
+    if x >= ball.x - ball.radius
+      and x <= ball.x + ball.radius
+      and y >= ball.y - ball.radius
+      and y <= ball.y + ball.radius
+      then return ball;
+  }
+  return none;
+}
+
+function<Ball> makeBall(real x, real y) {
+
+    real radiusDifference = MAX_BALL_RADIUS - MIN_BALL_RADIUS;
+    real radius = MIN_BALL_RADIUS + random() * (radiusDifference);
+
+    byte red = randomByte();
+    byte green = randomByte();
+    byte blue = randomByte();
+
+    return new Ball(x, y, radius, red, green, blue);
 }
 
 function<byte> randomByte() {
