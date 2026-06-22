@@ -24,11 +24,11 @@
 
 
 // Debug flag
-boolean DEBUG = false; 
+boolean DEBUG = true; 
 
 // Tracking utility
 array<Ball> balls;
-constant integer MAX_BALL_COUNT = 100;
+constant integer MAX_BALL_COUNT = 1200;
 integer BALL_COUNT = 0;
 
 // Screen utility
@@ -47,19 +47,37 @@ integer WORK_BUFFER_HEAD = 0;
 array<real> WORK_BUFFER = new array<integer>(WORK_BUFFER_COUNT);
 
 // Ball configuration
-constant real MIN_BALL_RADIUS = 30;
-constant real MAX_BALL_RADIUS = 50;
-constant real MAX_WORK_MS = 20;
-constant real RECOVER_WORK_MS = 17;
+real MIN_BALL_RADIUS;
+real MAX_BALL_RADIUS;
+real MAX_WORK_MS;
+real RECOVER_WORK_MS;
 boolean IS_RECOVERING = false;
 
 // World values
-constant real GRAVITY_X = 0;
-constant real GRAVITY_Y = 3200;
+real GRAVITY_X;
+real GRAVITY_Y;
 real DEFAULT_PLAY_RADIUS = 540; // Radius during testing; used for scaling
 real PLAY_RADIUS = 1;
 
 function start() {
+
+  // Defaults
+  MIN_BALL_RADIUS = 30;
+  MAX_BALL_RADIUS = 50;
+  MAX_WORK_MS = 20;
+  RECOVER_WORK_MS = 16.67;
+  GRAVITY_X = 0;
+  GRAVITY_Y = 3200;
+
+  // Debug overwrites
+  if DEBUG then {
+    MIN_BALL_RADIUS = 10;
+    MAX_BALL_RADIUS = 15;
+    GRAVITY_Y = 200;
+    MAX_WORK_MS = 18;
+    RECOVER_WORK_MS = 16.6;
+  }
+
   Runtime.setFixedUpdateRate(60);
 
   balls = new array<Ball>(MAX_BALL_COUNT);
@@ -68,66 +86,20 @@ function start() {
 
 optional<Ball> heldBall = none;
 function update() {
-  constant real deltaTime = Diagnostics.updateDeltaMilliseconds() / 1000;
-
-  real lastWork = Diagnostics.lastUpdateWorkMilliseconds();
-  if lastWork < RECOVER_WORK_MS then IS_RECOVERING = false;
-  if (IS_RECOVERING or Input.keyIsDown(37)) 
-    and BALL_COUNT > 0 then BALL_COUNT -= 1; 
-  if lastWork > MAX_WORK_MS then IS_RECOVERING = true;
-
+  // Set top-level values
   HALF_SCREEN_WIDTH = Viewport.hudWidth() / 2;
   HALF_SCREEN_HEIGHT = Viewport.hudHeight() / 2;
   PLAY_RADIUS = minimum(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
 
-  // Fast create balls for testing and tuning
-  if Input.keyIsDown(39) and BALL_COUNT < MAX_BALL_COUNT then {
-    Ball ball = makeBall(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
-    ball.accelerate(random() * GRAVITY_Y * 2, 0);
-  }
-
-  // Click a ball into existence
-  if Input.pointerWasPressed() then {
-    real inputX = Input.pointerScreenX();
-    real inputY = Input.pointerScreenY();
-
-    heldBall = ballAtPoint(inputX, inputY); 
-    if not heldBall.hasValue and BALL_COUNT < MAX_BALL_COUNT then {
-      heldBall = makeBall(inputX, inputY);
-    }
-  }
-
-  // Held ball follows mouse cursor
-  if heldBall.hasValue then {
-    heldBall.value.x = Input.pointerScreenX();
-    heldBall.value.y = Input.pointerScreenY();
-
-    // Adjust size of held ball
-    constant real growthRate = 100 * deltaTime;
-    if Input.keyIsDown(38) and heldBall.value.radius < MAX_BALL_RADIUS - growthRate
-      then heldBall.value.radius += growthRate; 
-    if Input.keyIsDown(40) and heldBall.value.radius > growthRate + MIN_BALL_RADIUS
-      then heldBall.value.radius -= growthRate; 
-  }
-
-  // Release held ball
-  if Input.pointerWasReleased() then {
-    heldBall = none;
-  }
-
-  if BALL_COUNT == 0 then return;
+  // Set update-local values
+  real deltaTime = Diagnostics.updateDeltaMilliseconds() / 1000;
   
-  foreach index in BALL_COUNT then {
-    Ball ball = balls[index];
-    ball.accelerate(GRAVITY_X, GRAVITY_Y);
-    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
-    foreach otherIndex in BALL_COUNT then {
-      if otherIndex != index then {
-        solveCollision(ball, balls[otherIndex]);
-      }
-    }
-    ball.updatePosition(deltaTime);
-  }
+  recoverWorkTimeUnderLoad();
+
+  fastCreateBall();
+  updateHeldBall(deltaTime);
+  
+  updateBallPhysics(deltaTime);
 }
 
 function draw() {}
@@ -149,23 +121,23 @@ function drawHud() {
   integer displayWorkMs = (workMsBufferSum / WORK_BUFFER_COUNT) as integer;
 
   if DEBUG then {
-    real fontSize = 24;
+    real fontSize = 12;
     real space = fontSize * 1.5;
     Draw.text(
-      "{displayWorkMs}ms workload", 
-      Viewport.hudWidth()/2,
-      (Viewport.hudHeight() - space)/2,
+      "{displayWorkMs} ms workload", 
+      10,
+      10 + space,
       fontSize,
-      "center",
+      "left",
       "center",
       TEXT_COLOR
     );
     Draw.text(
       "Ball Count: {BALL_COUNT}",
-      Viewport.hudWidth()/2,
-      (Viewport.hudHeight() + space)/2,
+      10,
+      10 + space * 2,
       fontSize,
-      "center",
+      "left",
       "center",
       TEXT_COLOR
     );
@@ -190,6 +162,70 @@ function drawHud() {
 
 }
 
+function fastCreateBall() {
+  // Fast create balls for testing and tuning
+  if Input.keyIsDown(39) then
+  {
+    optional<Ball> ball = tryMakeBall(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
+    // Move ball randomly horizontally to prevent a perfect column of balls
+    if ball.hasValue then ball.value.accelerate(random() * GRAVITY_Y * 2, 0);
+  }
+}
+
+function updateBallPhysics(real deltaTime) {
+  foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
+    ball.accelerate(GRAVITY_X, GRAVITY_Y);
+    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
+    foreach otherIndex in BALL_COUNT then {
+      if otherIndex != index then {
+        solveCollision(ball, balls[otherIndex]);
+      }
+    }
+    ball.updatePosition(deltaTime);
+  }
+}
+
+function updateHeldBall(real deltaTime) {
+  // Click a ball into existence and hold on to it
+  if Input.pointerWasPressed() then {
+    real inputX = Input.pointerScreenX();
+    real inputY = Input.pointerScreenY();
+
+    heldBall = ballAtPoint(inputX, inputY); 
+    if not heldBall.hasValue and BALL_COUNT < MAX_BALL_COUNT then {
+      heldBall = tryMakeBall(inputX, inputY);
+    }
+  }
+
+  // Held ball follows mouse cursor
+  if heldBall.hasValue then {
+    Ball ball = heldBall.value;
+    ball.x = Input.pointerScreenX();
+    ball.y = Input.pointerScreenY();
+
+    // Adjust size of held ball
+    constant real growthRate = 100 * deltaTime;
+    if Input.keyIsDown(38) and ball.radius < MAX_BALL_RADIUS - growthRate
+      then ball.radius += growthRate; 
+    if Input.keyIsDown(40) and ball.radius > growthRate + MIN_BALL_RADIUS
+      then ball.radius -= growthRate; 
+  }
+
+  // Release held ball
+  if Input.pointerWasReleased() then {
+    heldBall = none;
+  }
+}
+
+function recoverWorkTimeUnderLoad() {
+  real lastWork = Diagnostics.lastUpdateWorkMilliseconds();
+  if lastWork < RECOVER_WORK_MS then IS_RECOVERING = false;
+  if (IS_RECOVERING or Input.keyIsDown(37)) 
+    and BALL_COUNT > 0 then BALL_COUNT -= 1; 
+  if lastWork > MAX_WORK_MS then IS_RECOVERING = true;
+}
+
 function<optional<Ball>> ballAtPoint(real x, real y) {
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
@@ -202,7 +238,10 @@ function<optional<Ball>> ballAtPoint(real x, real y) {
   return none;
 }
 
-function<Ball> makeBall(real x, real y) {
+function<optional<Ball>> tryMakeBall(real x, real y) {
+    // Gate to prevent creating more balls than the system can handle at 60 fps
+    constant real lastWork = Diagnostics.lastUpdateWorkMilliseconds();
+    if lastWork >= RECOVER_WORK_MS then return none;
 
     real radiusDifference = MAX_BALL_RADIUS - MIN_BALL_RADIUS;
     real radius = MIN_BALL_RADIUS + random() * (radiusDifference);
