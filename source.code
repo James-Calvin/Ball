@@ -58,6 +58,7 @@ real GRAVITY_X;
 real GRAVITY_Y;
 real DEFAULT_PLAY_RADIUS = 540; // Radius during testing; used for scaling
 real PLAY_RADIUS = 1;
+integer SUBSTEPS = 4;
 
 function start() {
 
@@ -73,7 +74,7 @@ function start() {
   if DEBUG then {
     MIN_BALL_RADIUS = 10;
     MAX_BALL_RADIUS = 15;
-    GRAVITY_Y = 200;
+    GRAVITY_Y = 800;
     MAX_WORK_MS = 18;
     RECOVER_WORK_MS = 16.6;
   }
@@ -97,9 +98,12 @@ function update() {
   recoverWorkTimeUnderLoad();
 
   fastCreateBall();
-  updateHeldBall(deltaTime);
   
-  updateBallPhysics(deltaTime);
+  updateHeldBall(deltaTime);
+  real subDeltaTime = deltaTime / SUBSTEPS;
+  foreach substep in SUBSTEPS then {
+    updateBallPhysics(subDeltaTime);
+  }
 }
 
 function draw() {}
@@ -176,12 +180,22 @@ function updateBallPhysics(real deltaTime) {
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
     ball.accelerate(GRAVITY_X, GRAVITY_Y);
-    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
-    foreach otherIndex in BALL_COUNT then {
-      if otherIndex != index then {
-        solveCollision(ball, balls[otherIndex]);
-      }
+  }
+  foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
+    updateHeldBall(deltaTime);
+  }
+  for integer indexA = 0; indexA < BALL_COUNT -1; indexA += 1 then {
+    for integer indexB = indexA + 1; indexB < BALL_COUNT; indexB += 1  then {
+      solveCollision(balls[indexA], balls[indexB]);
     }
+  }
+  foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
+    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
+  }
+  foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
     ball.updatePosition(deltaTime);
   }
 }
@@ -201,8 +215,11 @@ function updateHeldBall(real deltaTime) {
   // Held ball follows mouse cursor
   if heldBall.hasValue then {
     Ball ball = heldBall.value;
+    ball.previousX = ball.x;
+    ball.previousY = ball.y;
     ball.x = Input.pointerScreenX();
     ball.y = Input.pointerScreenY();
+    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
 
     // Adjust size of held ball
     constant real growthRate = 100 * deltaTime;
