@@ -99,7 +99,8 @@ function update() {
 
   fastCreateBall();
   
-  updateHeldBall(deltaTime);
+  processHeldBallInput(deltaTime);
+  updateHeldBall();
   real subDeltaTime = deltaTime / SUBSTEPS;
   foreach substep in SUBSTEPS then {
     updateBallPhysics(subDeltaTime);
@@ -181,10 +182,6 @@ function updateBallPhysics(real deltaTime) {
     Ball ball = balls[index];
     ball.accelerate(GRAVITY_X, GRAVITY_Y);
   }
-  foreach index in BALL_COUNT then {
-    Ball ball = balls[index];
-    updateHeldBall(deltaTime);
-  }
   for integer indexA = 0; indexA < BALL_COUNT -1; indexA += 1 then {
     for integer indexB = indexA + 1; indexB < BALL_COUNT; indexB += 1  then {
       solveCollision(balls[indexA], balls[indexB]);
@@ -198,9 +195,10 @@ function updateBallPhysics(real deltaTime) {
     Ball ball = balls[index];
     ball.updatePosition(deltaTime);
   }
+  updateHeldBall();
 }
 
-function updateHeldBall(real deltaTime) {
+function processHeldBallInput(real deltaTime) {
   // Click a ball into existence and hold on to it
   if Input.pointerWasPressed() then {
     real inputX = Input.pointerScreenX();
@@ -212,17 +210,11 @@ function updateHeldBall(real deltaTime) {
     }
   }
 
-  // Held ball follows mouse cursor
+  // Adjust size of held ball
   if heldBall.hasValue then {
     Ball ball = heldBall.value;
-    ball.previousX = ball.x;
-    ball.previousY = ball.y;
-    ball.x = Input.pointerScreenX();
-    ball.y = Input.pointerScreenY();
-    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
-
-    // Adjust size of held ball
-    constant real growthRate = 100 * deltaTime;
+    real radiusRange = MAX_BALL_RADIUS - MIN_BALL_RADIUS;
+    constant real growthRate = radiusRange * deltaTime;
     if Input.keyIsDown(38) and ball.radius < MAX_BALL_RADIUS - growthRate
       then ball.radius += growthRate; 
     if Input.keyIsDown(40) and ball.radius > growthRate + MIN_BALL_RADIUS
@@ -232,6 +224,18 @@ function updateHeldBall(real deltaTime) {
   // Release held ball
   if Input.pointerWasReleased() then {
     heldBall = none;
+  }
+}
+
+function updateHeldBall() {
+  // Held ball follows mouse cursor
+  if heldBall.hasValue then {
+    Ball ball = heldBall.value;
+    ball.previousX = ball.x;
+    ball.previousY = ball.y;
+    ball.x = Input.pointerScreenX();
+    ball.y = Input.pointerScreenY();
+    applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
   }
 }
 
