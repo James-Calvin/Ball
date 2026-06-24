@@ -28,7 +28,7 @@ boolean DEBUG = true;
 
 // Tracking utility
 array<Ball> balls;
-constant integer MAX_BALL_COUNT = 1200;
+constant integer MAX_BALL_COUNT = 5000;
 integer BALL_COUNT = 0;
 
 // Screen utility
@@ -58,7 +58,18 @@ real GRAVITY_X;
 real GRAVITY_Y;
 real DEFAULT_PLAY_RADIUS = 540; // Radius during testing; used for scaling
 real PLAY_RADIUS = 1;
-integer SUBSTEPS = 4;
+real SCALE;
+real PREVIOUS_SCALE;
+integer SUBSTEPS = 16;
+
+// Spatial grid values
+array<integer> GRID_HEADS;
+array<integer> NEXT_IN_CELL;
+integer GRID_COLUMNS = 0;
+integer GRID_ROWS = 0;
+integer GRID_CELL_COUNT = 0;
+real GRID_CELL_SIZE = 1;
+integer MINIMUM_CELL_SIZE = 8;
 
 function start() {
 
@@ -72,9 +83,9 @@ function start() {
 
   // Debug overwrites
   if DEBUG then {
-    MIN_BALL_RADIUS = 10;
-    MAX_BALL_RADIUS = 15;
-    GRAVITY_Y = 800;
+    MIN_BALL_RADIUS = 4;
+    MAX_BALL_RADIUS = 8;
+    GRAVITY_Y = 1600;
     MAX_WORK_MS = 18;
     RECOVER_WORK_MS = 16.6;
   }
@@ -83,6 +94,8 @@ function start() {
 
   balls = new array<Ball>(MAX_BALL_COUNT);
   foreach index in WORK_BUFFER_COUNT then WORK_BUFFER[index] = 30;
+
+  NEXT_IN_CELL = new array<integer>(MAX_BALL_COUNT);
 }
 
 optional<Ball> heldBall = none;
@@ -91,13 +104,27 @@ function update() {
   HALF_SCREEN_WIDTH = Viewport.hudWidth() / 2;
   HALF_SCREEN_HEIGHT = Viewport.hudHeight() / 2;
   PLAY_RADIUS = minimum(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
+  PREVIOUS_SCALE = SCALE;
+  SCALE = PLAY_RADIUS / DEFAULT_PLAY_RADIUS;
+  if SCALE != PREVIOUS_SCALE then foreach index in BALL_COUNT then {
+    Ball ball = balls[index];
+    ball.scaledRadius = ball.radius * SCALE;
+  }
 
   // Set update-local values
   real deltaTime = Diagnostics.updateDeltaMilliseconds() / 1000;
+
+  updateSpatialGridSize();
   
   recoverWorkTimeUnderLoad();
 
-  fastCreateBall();
+  fastCreateBall(20);
+  if Input.keyIsDown(32) then
+    foreach index in BALL_COUNT then {
+      Ball ball = balls[index];
+      ball.previousX = ball.x;
+      ball.previousY = ball.y;
+    }
   
   processHeldBallInput(deltaTime);
   updateHeldBall();
@@ -161,19 +188,140 @@ function drawHud() {
     foreach index in BALL_COUNT then {
       Ball ball = balls[index];
       Color ballColor = Colors.rgb(ball.r, ball.g, ball.b);
-      Draw.circle(ball.x, ball.y, ball.scaledRadius(), ballColor);
+      Draw.circle(ball.x, ball.y, ball.scaledRadius, ballColor);
     }
   }
 
+  // if DEBUG then {
+  //   real pointerX = Input.pointerScreenX();
+  //   real pointerY = Input.pointerScreenY();
+  //   integer column = (pointerX / GRID_CELL_SIZE) as integer;
+  //   integer row = (pointerY / GRID_CELL_SIZE) as integer;
+  //   real x = column * GRID_CELL_SIZE;
+  //   real y = row * GRID_CELL_SIZE;
+  //   Draw.rectangle(x, y, GRID_CELL_SIZE, GRID_CELL_SIZE, WHITE);
+  // }
+
 }
 
-function fastCreateBall() {
+function buildSpatialGrid() {
+  foreach cellIndex in GRID_CELL_COUNT then {
+    GRID_HEADS[cellIndex] = -1;
+  }
+
+  foreach ballIndex in BALL_COUNT then {
+    Ball ball = balls[ballIndex];
+    integer cellIndex = gridCellForPosition(ball.x, ball.y);
+    NEXT_IN_CELL[ballIndex] = GRID_HEADS[cellIndex];
+    GRID_HEADS[cellIndex] = ballIndex;
+  }
+}
+
+function<integer> gridCellForPosition(real x, real y) {
+  integer column = (x / GRID_CELL_SIZE) as integer;
+  integer row = (y / GRID_CELL_SIZE) as integer;
+
+  if column < 0 then column = 0;
+  if row < 0 then row = 0;
+  if column >= GRID_COLUMNS then column = GRID_COLUMNS - 1;
+  if row >= GRID_ROWS then row = GRID_ROWS - 1;
+
+  return row * GRID_COLUMNS + column;
+}
+
+function solveGridCollisions() {
+  for integer row = 0; row < GRID_ROWS; row += 1 then {
+    for integer column = 0; column < GRID_COLUMNS; column += 1 then {
+      integer sourceCell = row * GRID_COLUMNS + column;
+
+      solvePairsInsideCell(sourceCell);
+
+      solvePairsBetweenCells(sourceCell, column + 1, row);     // East
+      solvePairsBetweenCells(sourceCell, column, row + 1);     // South
+      solvePairsBetweenCells(sourceCell, column + 1, row + 1); // Southeast
+      solvePairsBetweenCells(sourceCell, column - 1, row + 1); // Southwest
+    }
+  }
+}
+
+function solvePairsInsideCell(integer cellIndex) {
+  for integer indexA = GRID_HEADS[cellIndex];
+    indexA >= 0;
+    indexA = NEXT_IN_CELL[indexA] then {
+
+    for integer indexB = NEXT_IN_CELL[indexA];
+      indexB >= 0;
+      indexB = NEXT_IN_CELL[indexB] then {
+
+      solveCollision(balls[indexA], balls[indexB]);
+    }
+  }
+}
+
+function solvePairsBetweenCells(
+  integer sourceCell,
+  integer targetColumn,
+  integer targetRow
+) {
+  if targetColumn < 0 or targetColumn >= GRID_COLUMNS then return;
+  if targetRow < 0 or targetRow >= GRID_ROWS then return;
+
+  integer targetCell = targetRow * GRID_COLUMNS + targetColumn;
+
+  for integer indexA = GRID_HEADS[sourceCell];
+    indexA >= 0;
+    indexA = NEXT_IN_CELL[indexA] then {
+
+    for integer indexB = GRID_HEADS[targetCell];
+      indexB >= 0;
+      indexB = NEXT_IN_CELL[indexB] then {
+
+      solveCollision(balls[indexA], balls[indexB]);
+    }
+  }
+}
+
+function updateSpatialGridSize() {
+  if SCALE == PREVIOUS_SCALE then return;
+  real desiredCellSize = 
+    MAX_BALL_RADIUS * 2 * PLAY_RADIUS / DEFAULT_PLAY_RADIUS;
+  desiredCellSize = maximum(desiredCellSize, MINIMUM_CELL_SIZE);
+
+  integer desiredColumns =
+    ((Viewport.hudWidth() / desiredCellSize) as integer) + 1;
+
+  integer desiredRows =
+    ((Viewport.hudHeight() / desiredCellSize) as integer) + 1;
+
+  GRID_CELL_SIZE = desiredCellSize;
+
+  if desiredColumns != GRID_COLUMNS
+    or desiredRows != GRID_ROWS then {
+      GRID_COLUMNS = desiredColumns;
+      GRID_ROWS = desiredRows;
+      GRID_CELL_COUNT = GRID_COLUMNS * GRID_ROWS;
+      GRID_HEADS = new array<integer>(GRID_CELL_COUNT);
+    }
+}
+
+function fastCreateBall(integer ballPerFrame) {
   // Fast create balls for testing and tuning
   if Input.keyIsDown(39) then
   {
-    optional<Ball> ball = tryMakeBall(HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT);
-    // Move ball randomly horizontally to prevent a perfect column of balls
-    if ball.hasValue then ball.value.accelerate(random() * GRAVITY_Y * 2, 0);
+    foreach _ in ballPerFrame then {
+      real range = 10;
+      real x = random() * range - range/2 + HALF_SCREEN_WIDTH;
+      real y = random() * range - range/2 + HALF_SCREEN_HEIGHT;
+      optional<Ball> ball = tryMakeBall(x, y);
+      // Move ball randomly horizontally to prevent a perfect column of balls
+      if ball.hasValue then ball.value.accelerate(random() * GRAVITY_Y * 2, 0);
+    }
+  }
+
+  if Input.keyIsDown(37) then {
+    foreach _ in ballPerFrame then {
+      if BALL_COUNT > 0 then BALL_COUNT -= 1;
+    }
   }
 }
 
@@ -182,15 +330,15 @@ function updateBallPhysics(real deltaTime) {
     Ball ball = balls[index];
     ball.accelerate(GRAVITY_X, GRAVITY_Y);
   }
-  for integer indexA = 0; indexA < BALL_COUNT -1; indexA += 1 then {
-    for integer indexB = indexA + 1; indexB < BALL_COUNT; indexB += 1  then {
-      solveCollision(balls[indexA], balls[indexB]);
-    }
-  }
+
+  buildSpatialGrid();
+  solveGridCollisions();
+
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
     applyConstraint(ball, HALF_SCREEN_WIDTH, HALF_SCREEN_HEIGHT, PLAY_RADIUS);
   }
+
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
     ball.updatePosition(deltaTime);
@@ -242,7 +390,7 @@ function updateHeldBall() {
 function recoverWorkTimeUnderLoad() {
   real lastWork = Diagnostics.lastUpdateWorkMilliseconds();
   if lastWork < RECOVER_WORK_MS then IS_RECOVERING = false;
-  if (IS_RECOVERING or Input.keyIsDown(37)) 
+  if (IS_RECOVERING) 
     and BALL_COUNT > 0 then BALL_COUNT -= 1; 
   if lastWork > MAX_WORK_MS then IS_RECOVERING = true;
 }
@@ -250,10 +398,10 @@ function recoverWorkTimeUnderLoad() {
 function<optional<Ball>> ballAtPoint(real x, real y) {
   foreach index in BALL_COUNT then {
     Ball ball = balls[index];
-    if x >= ball.x - ball.scaledRadius()
-      and x <= ball.x + ball.scaledRadius()
-      and y >= ball.y - ball.scaledRadius()
-      and y <= ball.y + ball.scaledRadius()
+    if x >= ball.x - ball.scaledRadius
+      and x <= ball.x + ball.scaledRadius
+      and y >= ball.y - ball.scaledRadius
+      and y <= ball.y + ball.scaledRadius
       then return ball;
   }
   return none;
@@ -283,30 +431,38 @@ function applyConstraint(Ball ball, real x, real y, real radius) {
   constant real dy = ball.y - y;
   constant real distance = squareRoot(dx * dx + dy * dy);
 
-  if distance > (radius - ball.scaledRadius()) then {
+  if distance > (radius - ball.scaledRadius) then {
     constant real nX = dx / distance;
     constant real nY = dy / distance;
-    ball.x = x + nX * (radius - ball.scaledRadius());
-    ball.y = y + nY * (radius - ball.scaledRadius());
+    ball.x = x + nX * (radius - ball.scaledRadius);
+    ball.y = y + nY * (radius - ball.scaledRadius);
   }
 }
 
 function solveCollision(Ball ballA, Ball ballB) {
   constant real dx = ballB.x - ballA.x;
   constant real dy = ballB.y - ballA.y;
-  constant real distance = squareRoot(dx * dx + dy * dy);
-  constant real minDistance = ballA.scaledRadius() + ballB.scaledRadius();
 
-  if distance > 0 and distance < minDistance then {
-    constant real overlap = minDistance - distance;
-    constant real nX = dx / distance;
-    constant real nY = dy / distance;
+  constant real minDistance =
+    ballA.scaledRadius + ballB.scaledRadius;
 
-    ballA.x = ballA.x - nX * overlap / 2;
-    ballA.y = ballA.y - nY * overlap / 2;
-    ballB.x = ballB.x + nX * overlap / 2;
-    ballB.y = ballB.y + nY * overlap / 2;
-  }
+  constant real distanceSquared = dx * dx + dy * dy;
+  constant real minDistanceSquared = minDistance * minDistance;
+
+  // Keeps exact-overlap behavior unchanged for the center spawn effect.
+  if distanceSquared <= 0 or distanceSquared >= minDistanceSquared then return;
+
+  constant real distance = squareRoot(distanceSquared);
+  constant real overlap = minDistance - distance;
+
+  constant real nX = dx / distance;
+  constant real nY = dy / distance;
+
+  ballA.x = ballA.x - nX * overlap / 2;
+  ballA.y = ballA.y - nY * overlap / 2;
+
+  ballB.x = ballB.x + nX * overlap / 2;
+  ballB.y = ballB.y + nY * overlap / 2;
 }
 
 object Ball {
@@ -317,6 +473,7 @@ object Ball {
   real accelerationX;
   real accelerationY;
   real radius;
+  real scaledRadius;
 
   byte r;
   byte g;
@@ -334,14 +491,12 @@ object Ball {
     this.g = g;
     this.b = b;
 
+    this.scaledRadius = radius * SCALE;
+
     if BALL_COUNT < MAX_BALL_COUNT then {
       balls[BALL_COUNT] = this;
       BALL_COUNT += 1;
     }
-  }
-
-  function<real> scaledRadius() {
-    return PLAY_RADIUS / DEFAULT_PLAY_RADIUS * radius; 
   }
 
   function updatePosition(real deltaTime) {
